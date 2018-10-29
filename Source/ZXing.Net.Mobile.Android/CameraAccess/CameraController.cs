@@ -19,7 +19,7 @@ namespace ZXing.Mobile.CameraAccess
         private readonly SurfaceView _surfaceView;
         private readonly CameraEventsListener _cameraEventListener;
         private int _cameraId;
-		IScannerSessionHost _scannerHost;
+        IScannerSessionHost _scannerHost;
 
         public CameraController(SurfaceView surfaceView, CameraEventsListener cameraEventListener, IScannerSessionHost scannerHost)
         {
@@ -27,7 +27,7 @@ namespace ZXing.Mobile.CameraAccess
             _holder = surfaceView.Holder;
             _surfaceView = surfaceView;
             _cameraEventListener = cameraEventListener;
-			_scannerHost = scannerHost;
+            _scannerHost = scannerHost;
         }
 
         public Camera Camera { get; private set; }
@@ -69,7 +69,7 @@ namespace ZXing.Mobile.CameraAccess
             try
             {
                 Camera.SetPreviewDisplay(_holder);
-                
+
 
                 var previewParameters = Camera.GetParameters();
                 var previewSize = previewParameters.PreviewSize;
@@ -77,16 +77,16 @@ namespace ZXing.Mobile.CameraAccess
 
 
                 int bufferSize = (previewSize.Width * previewSize.Height * bitsPerPixel) / 8;
-				const int NUM_PREVIEW_BUFFERS = 5;
-				for (uint i = 0; i < NUM_PREVIEW_BUFFERS; ++i)
-				{
-					using (var buffer = new FastJavaByteArray(bufferSize))
-						Camera.AddCallbackBuffer(buffer);
-				}
+                const int NUM_PREVIEW_BUFFERS = 5;
+                for (uint i = 0; i < NUM_PREVIEW_BUFFERS; ++i)
+                {
+                    using (var buffer = new FastJavaByteArray(bufferSize))
+                        Camera.AddCallbackBuffer(buffer);
+                }
 
-                
 
-				Camera.StartPreview();
+
+                Camera.StartPreview();
 
                 Camera.SetNonMarshalingPreviewCallback(_cameraEventListener);
             }
@@ -173,7 +173,7 @@ namespace ZXing.Mobile.CameraAccess
 
                     var whichCamera = CameraFacing.Back;
 
-					if (_scannerHost.ScanningOptions.UseFrontCameraIfAvailable.HasValue &&
+                    if (_scannerHost.ScanningOptions.UseFrontCameraIfAvailable.HasValue &&
                         _scannerHost.ScanningOptions.UseFrontCameraIfAvailable.Value)
                         whichCamera = CameraFacing.Front;
 
@@ -182,9 +182,12 @@ namespace ZXing.Mobile.CameraAccess
                         Camera.GetCameraInfo(i, camInfo);
                         if (camInfo.Facing == whichCamera)
                         {
+
+
                             Android.Util.Log.Debug(MobileBarcodeScanner.TAG,
                                 "Found " + whichCamera + " Camera, opening...");
                             Camera = Camera.Open(i);
+
                             _cameraId = i;
                             found = true;
                             break;
@@ -316,11 +319,11 @@ namespace ZXing.Mobile.CameraAccess
         {
             if (Camera == null) return;
 
-			if (_scannerHost.ScanningOptions.DisableAutofocus)
-			{
-				Android.Util.Log.Debug(MobileBarcodeScanner.TAG, "AutoFocus Disabled");
-				return;
-			}
+            if (_scannerHost.ScanningOptions.DisableAutofocus)
+            {
+                Android.Util.Log.Debug(MobileBarcodeScanner.TAG, "AutoFocus Disabled");
+                return;
+            }
 
             var cameraParams = Camera.GetParameters();
 
@@ -420,13 +423,13 @@ namespace ZXing.Mobile.CameraAccess
             int correctedDegrees;
             if (info.Facing == CameraFacing.Front)
             {
-                correctedDegrees = (info.Orientation + degrees)%360;
-                correctedDegrees = (360 - correctedDegrees)%360; // compensate the mirror
+                correctedDegrees = (info.Orientation + degrees) % 360;
+                correctedDegrees = (360 - correctedDegrees) % 360; // compensate the mirror
             }
             else
             {
                 // back-facing
-                correctedDegrees = (info.Orientation - degrees + 360)%360;
+                correctedDegrees = (info.Orientation - degrees + 360) % 360;
             }
 
             return correctedDegrees;

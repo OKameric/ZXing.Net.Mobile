@@ -8,14 +8,14 @@ using Foundation;
 using ZXing.Net.Mobile.Forms.iOS;
 using UIKit;
 
-[assembly:ExportRenderer(typeof(ZXingScannerView), typeof(ZXingScannerViewRenderer))]
+[assembly: ExportRenderer(typeof(ZXingScannerView), typeof(ZXingScannerViewRenderer))]
 namespace ZXing.Net.Mobile.Forms.iOS
 {
     [Preserve(AllMembers = true)]
     public class ZXingScannerViewRenderer : ViewRenderer<ZXingScannerView, ZXing.Mobile.ZXingScannerView>
-    {   
+    {
         // No-op to be called from app to prevent linker from stripping this out    
-        public static void Init ()
+        public static void Init()
         {
             var temp = DateTime.Now;
         }
@@ -29,74 +29,88 @@ namespace ZXing.Net.Mobile.Forms.iOS
 
             formsView = Element;
 
-            if (zxingView == null) {
+            if (zxingView == null)
+            {
 
                 // Process requests for autofocus
                 formsView.AutoFocusRequested += (x, y) => {
-                    if (zxingView != null) {
+                    if (zxingView != null)
+                    {
                         if (x < 0 && y < 0)
-                            zxingView.AutoFocus ();
+                            zxingView.AutoFocus();
                         else
-                            zxingView.AutoFocus (x, y);
+                            zxingView.AutoFocus(x, y);
                     }
                 };
 
 
-                zxingView = new ZXing.Mobile.ZXingScannerView ();
+                zxingView = new ZXing.Mobile.ZXingScannerView();
                 zxingView.UseCustomOverlayView = true;
                 zxingView.AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight;
 
-                base.SetNativeControl (zxingView);
+                base.SetNativeControl(zxingView);
 
                 if (formsView.IsScanning)
-                    zxingView.StartScanning (formsView.RaiseScanResult, formsView.Options);
+                    zxingView.StartScanning(formsView.RaiseScanResult, formsView.Options);
 
                 if (!formsView.IsAnalyzing)
-                    zxingView.PauseAnalysis ();
+                    zxingView.PauseAnalysis();
 
                 if (formsView.IsTorchOn)
-                    zxingView.Torch (formsView.IsTorchOn);
+                    zxingView.Torch(formsView.IsTorchOn);
+
+
+                zxingView.SendPictureBack += SendPictureBack;
             }
 
-            base.OnElementChanged (e);
+            base.OnElementChanged(e);
         }
-
-        protected override void OnElementPropertyChanged (object sender, PropertyChangedEventArgs e)
+        private void SendPictureBack(object sender, byte[] e)
         {
-            base.OnElementPropertyChanged (sender, e);
+            formsView.OnTakePicture?.Invoke(this, e);
+        }
+        protected override void OnElementPropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            base.OnElementPropertyChanged(sender, e);
 
             if (zxingView == null)
                 return;
 
-            switch (e.PropertyName) {
-            case nameof (ZXingScannerView.IsTorchOn):
-                zxingView.Torch (formsView.IsTorchOn);
-                break;
-            case nameof (ZXingScannerView.IsScanning):
-                if (formsView.IsScanning)
-                    zxingView.StartScanning (formsView.RaiseScanResult, formsView.Options);
-                else
-                    zxingView.StopScanning ();
-                break;
-            case nameof (ZXingScannerView.IsAnalyzing):
-                if (formsView.IsAnalyzing)
-                    zxingView.ResumeAnalysis ();
-                else
-                    zxingView.PauseAnalysis ();
-                break;
-            } 
+            switch (e.PropertyName)
+            {
+                case nameof(ZXingScannerView.IsTorchOn):
+                    zxingView.Torch(formsView.IsTorchOn);
+                    break;
+                case nameof(ZXingScannerView.IsScanning):
+                    if (formsView.IsScanning)
+                        zxingView.StartScanning(formsView.RaiseScanResult, formsView.Options);
+                    else
+                        zxingView.StopScanning();
+                    break;
+                case nameof(ZXingScannerView.IsAnalyzing):
+                    if (formsView.IsAnalyzing)
+                        zxingView.ResumeAnalysis();
+                    else
+                        zxingView.PauseAnalysis();
+                    break;
+                case nameof(ZXingScannerView.TakePicture):
+                    //if (formsView.IsAnalyzing)
+                    //    zxingSurface.PauseAnalysis();
+                    zxingView.TakePicture();
+                    break;
+            }
         }
 
-        public override void TouchesEnded (NSSet touches, UIKit.UIEvent evt)
+        public override void TouchesEnded(NSSet touches, UIKit.UIEvent evt)
         {
-            base.TouchesEnded (touches, evt);
+            base.TouchesEnded(touches, evt);
 
-            zxingView.AutoFocus ();
+            zxingView.AutoFocus();
         }
 
-        public override void LayoutSubviews ()
+        public override void LayoutSubviews()
         {
-            base.LayoutSubviews ();
+            base.LayoutSubviews();
 
             // Find the best guess at current orientation
             var o = UIApplication.SharedApplication.StatusBarOrientation;
@@ -104,7 +118,7 @@ namespace ZXing.Net.Mobile.Forms.iOS
                 o = ViewController.InterfaceOrientation;
 
             // Tell the native view to rotate
-            zxingView.DidRotate (o);
+            zxingView.DidRotate(o);
         }
     }
 }

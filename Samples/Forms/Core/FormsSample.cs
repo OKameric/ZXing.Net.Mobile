@@ -9,7 +9,9 @@ namespace FormsSample
     {       
         public App ()
         {
-            MainPage = new NavigationPage (new HomePage());   
+            var home = new HomePage();
+            NavigationPage.SetHasNavigationBar(home, false);
+            MainPage = new NavigationPage(home);
         }        
 
         protected override void OnStart ()

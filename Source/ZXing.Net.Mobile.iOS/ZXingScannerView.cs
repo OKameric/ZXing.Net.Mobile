@@ -19,54 +19,66 @@ using ZXing.Mobile;
 
 namespace ZXing.Mobile
 {
-	public class ZXingScannerView : UIView, IZXingScanner<UIView>, IScannerSessionHost
-	{
-		public delegate void ScannerSetupCompleteDelegate();
-		public event ScannerSetupCompleteDelegate OnScannerSetupComplete;
+    public class ZXingScannerView : UIView, IZXingScanner<UIView>, IScannerSessionHost
+    {
+        public EventHandler<byte[]> SendPictureBack;
+        public delegate void ScannerSetupCompleteDelegate();
+        public event ScannerSetupCompleteDelegate OnScannerSetupComplete;
+        public bool Picture { get; set; } = false;
 
-		public ZXingScannerView()
-		{
-		}
+        public ZXingScannerView()
+        {
+        }
 
-		public ZXingScannerView(IntPtr handle) : base(handle)
-		{
-		}
+        public ZXingScannerView(IntPtr handle) : base(handle)
+        {
+        }
 
-		public ZXingScannerView (CGRect frame) : base(frame)
-		{
-		}
+        public ZXingScannerView(CGRect frame) : base(frame)
+        {
+        }
 
-		AVCaptureSession session;
-		AVCaptureVideoPreviewLayer previewLayer;
-		AVCaptureVideoDataOutput output;
-		OutputRecorder outputRecorder;
-		DispatchQueue queue;
-		Action<ZXing.Result> resultCallback;
-		volatile bool stopped = true;
+        public void TakePicture()
+        {
+            Picture = true;
+        }
+        private void OnPictureTaken(object sender, byte[] e)
+        {
+            SendPictureBack?.Invoke(this, e);
+        }
 
-		UIView layerView;
-		UIView overlayView = null;
+        AVCaptureSession session;
+        AVCaptureVideoPreviewLayer previewLayer;
+        AVCaptureVideoDataOutput output;
+        OutputRecorder outputRecorder;
+        DispatchQueue queue;
+        Action<ZXing.Result> resultCallback;
+        volatile bool stopped = true;
 
-		public MobileBarcodeScanningOptions ScanningOptions { get; set; }
+        UIView layerView;
+        UIView overlayView = null;
+
+        public MobileBarcodeScanningOptions ScanningOptions { get; set; }
 
         public event Action OnCancelButtonPressed;
 
-		public string CancelButtonText { get;set; }
-		public string FlashButtonText { get;set; }
+        public string CancelButtonText { get; set; }
+        public string FlashButtonText { get; set; }
 
-		bool shouldRotatePreviewBuffer = false;
+        bool shouldRotatePreviewBuffer = false;
 
-		void Setup(CGRect frame)
-		{
-			var started = DateTime.UtcNow;
+        void Setup(CGRect frame)
+        {
+            var started = DateTime.UtcNow;
 
-			if (overlayView != null)
-				overlayView.RemoveFromSuperview ();
+            if (overlayView != null)
+                overlayView.RemoveFromSuperview();
 
             if (UseCustomOverlayView)
                 overlayView = CustomOverlayView;
-            else {
-                overlayView = new ZXingDefaultOverlayView (new CGRect (0, 0, this.Frame.Width, this.Frame.Height),
+            else
+            {
+                overlayView = new ZXingDefaultOverlayView(new CGRect(0, 0, this.Frame.Width, this.Frame.Height),
                     TopText, BottomText, CancelButtonText, FlashButtonText,
                     () => {
                         var evt = OnCancelButtonPressed;
@@ -75,9 +87,9 @@ namespace ZXing.Mobile
                     }, ToggleTorch);
             }
 
-			if (overlayView != null)
-			{
-				/*UITapGestureRecognizer tapGestureRecognizer = new UITapGestureRecognizer ();
+            if (overlayView != null)
+            {
+                /*UITapGestureRecognizer tapGestureRecognizer = new UITapGestureRecognizer ();
 
 				tapGestureRecognizer.AddTarget (() => {
 
@@ -94,385 +106,400 @@ namespace ZXing.Mobile
 
 				overlayView.AddGestureRecognizer (tapGestureRecognizer);*/
 
-				overlayView.Frame = new CGRect(0, 0, this.Frame.Width, this.Frame.Height);
-				overlayView.AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight;
-			}
+                overlayView.Frame = new CGRect(0, 0, this.Frame.Width, this.Frame.Height);
+                overlayView.AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight;
+            }
 
-			var total = DateTime.UtcNow - started;
-			Console.WriteLine ("ZXingScannerView.Setup() took {0} ms.", total.TotalMilliseconds);
-		}
-					
-		
-		bool torch = false;
-		bool analyzing = true;
-	
-
-		bool SetupCaptureSession ()
-		{
-			var started = DateTime.UtcNow;
-
-			var availableResolutions = new List<CameraResolution> ();
-
-			var consideredResolutions = new Dictionary<NSString, CameraResolution> {
-				{ AVCaptureSession.Preset352x288, new CameraResolution 	 { Width = 352,  Height = 288 } },
-				{ AVCaptureSession.PresetMedium, new CameraResolution 	 { Width = 480,  Height = 360 } },	//480x360
-				{ AVCaptureSession.Preset640x480, new CameraResolution 	 { Width = 640,  Height = 480 } },
-				{ AVCaptureSession.Preset1280x720, new CameraResolution  { Width = 1280, Height = 720 } },
-				{ AVCaptureSession.Preset1920x1080, new CameraResolution { Width = 1920, Height = 1080 } }
-			};
-				
-			// configure the capture session for low resolution, change this if your code
-			// can cope with more data or volume
-			session = new AVCaptureSession () {
-				SessionPreset = AVCaptureSession.Preset640x480
-			};
-			
-			// create a device input and attach it to the session
-//			var captureDevice = AVCaptureDevice.DefaultDeviceWithMediaType (AVMediaType.Video);
-			AVCaptureDevice captureDevice = null;
-			var devices = AVCaptureDevice.DevicesWithMediaType(AVMediaType.Video);
-			foreach (var device in devices)
-			{
-				captureDevice = device;
-				if (ScanningOptions.UseFrontCameraIfAvailable.HasValue &&
-				    ScanningOptions.UseFrontCameraIfAvailable.Value &&
-				    device.Position == AVCaptureDevicePosition.Front)
-
-					break; //Front camera successfully set
-				else if (device.Position == AVCaptureDevicePosition.Back && (!ScanningOptions.UseFrontCameraIfAvailable.HasValue || !ScanningOptions.UseFrontCameraIfAvailable.Value))
-					break; //Back camera succesfully set
-			}
-			if (captureDevice == null){
-				Console.WriteLine ("No captureDevice - this won't work on the simulator, try a physical device");
-				if (overlayView != null)
-				{
-					this.AddSubview (overlayView);
-					this.BringSubviewToFront (overlayView);
-				}
-				return false;
-			}
-
-			CameraResolution resolution = null;
-
-			// Find resolution
-			// Go through the resolutions we can even consider
-			foreach (var cr in consideredResolutions) {
-				// Now check to make sure our selected device supports the resolution
-				// so we can add it to the list to pick from
-				if (captureDevice.SupportsAVCaptureSessionPreset (cr.Key))
-					availableResolutions.Add (cr.Value);
-			}
-
-			resolution = ScanningOptions.GetResolution (availableResolutions);
-
-			// See if the user selected a resolution
-			if (resolution != null) {
-				// Now get the preset string from the resolution chosen
-				var preset = (from c in consideredResolutions
-							  where c.Value.Width == resolution.Width
-								&& c.Value.Height == resolution.Height
-							  select c.Key).FirstOrDefault ();
-
-				// If we found a matching preset, let's set it on the session
-				if (!string.IsNullOrEmpty(preset))
-					session.SessionPreset = preset;
-			}
-
-			var input = AVCaptureDeviceInput.FromDevice (captureDevice);
-			if (input == null){
-				Console.WriteLine ("No input - this won't work on the simulator, try a physical device");
-				if (overlayView != null)
-				{
-					this.AddSubview (overlayView);
-					this.BringSubviewToFront (overlayView);
-				}				
-				return false;
-			}
-			else
-				session.AddInput (input);
+            var total = DateTime.UtcNow - started;
+            Console.WriteLine("ZXingScannerView.Setup() took {0} ms.", total.TotalMilliseconds);
+        }
 
 
-			var startedAVPreviewLayerAlloc = PerformanceCounter.Start();
-
-			previewLayer = new AVCaptureVideoPreviewLayer(session);
-
-			PerformanceCounter.Stop(startedAVPreviewLayerAlloc, "Alloc AVCaptureVideoPreviewLayer took {0} ms.");
+        bool torch = false;
+        bool analyzing = true;
 
 
-			// //Framerate set here (15 fps)
-			// if (UIDevice.CurrentDevice.CheckSystemVersion (7, 0))
-			// {
-			// 	var perf1 = PerformanceCounter.Start ();
+        bool SetupCaptureSession()
+        {
+            var started = DateTime.UtcNow;
 
-			// 	NSError lockForConfigErr = null;
+            var availableResolutions = new List<CameraResolution>();
 
-			// 	captureDevice.LockForConfiguration (out lockForConfigErr);
-			// 	if (lockForConfigErr == null)
-			// 	{
-			// 		captureDevice.ActiveVideoMinFrameDuration = new CMTime (1, 10);
-			// 		captureDevice.UnlockForConfiguration ();
-			// 	}
+            var consideredResolutions = new Dictionary<NSString, CameraResolution> {
+                { AVCaptureSession.Preset352x288, new CameraResolution   { Width = 352,  Height = 288 } },
+                { AVCaptureSession.PresetMedium, new CameraResolution    { Width = 480,  Height = 360 } },	//480x360
+				{ AVCaptureSession.Preset640x480, new CameraResolution   { Width = 640,  Height = 480 } },
+                { AVCaptureSession.Preset1280x720, new CameraResolution  { Width = 1280, Height = 720 } },
+                { AVCaptureSession.Preset1920x1080, new CameraResolution { Width = 1920, Height = 1080 } }
+            };
 
-			// 	PerformanceCounter.Stop (perf1, "PERF: ActiveVideoMinFrameDuration Took {0} ms");
-			// }
-   //          else
-   //              previewLayer.Connection.VideoMinFrameDuration = new CMTime(1, 10);
+            // configure the capture session for low resolution, change this if your code
+            // can cope with more data or volume
+            session = new AVCaptureSession()
+            {
+                SessionPreset = AVCaptureSession.Preset640x480
+            };
+
+            // create a device input and attach it to the session
+            //			var captureDevice = AVCaptureDevice.DefaultDeviceWithMediaType (AVMediaType.Video);
+            AVCaptureDevice captureDevice = null;
+            var devices = AVCaptureDevice.DevicesWithMediaType(AVMediaType.Video);
+            foreach (var device in devices)
+            {
+                captureDevice = device;
+                if (ScanningOptions.UseFrontCameraIfAvailable.HasValue &&
+                    ScanningOptions.UseFrontCameraIfAvailable.Value &&
+                    device.Position == AVCaptureDevicePosition.Front)
+
+                    break; //Front camera successfully set
+                else if (device.Position == AVCaptureDevicePosition.Back && (!ScanningOptions.UseFrontCameraIfAvailable.HasValue || !ScanningOptions.UseFrontCameraIfAvailable.Value))
+                    break; //Back camera succesfully set
+            }
+            if (captureDevice == null)
+            {
+                Console.WriteLine("No captureDevice - this won't work on the simulator, try a physical device");
+                if (overlayView != null)
+                {
+                    this.AddSubview(overlayView);
+                    this.BringSubviewToFront(overlayView);
+                }
+                return false;
+            }
+
+            CameraResolution resolution = null;
+
+            // Find resolution
+            // Go through the resolutions we can even consider
+            foreach (var cr in consideredResolutions)
+            {
+                // Now check to make sure our selected device supports the resolution
+                // so we can add it to the list to pick from
+                if (captureDevice.SupportsAVCaptureSessionPreset(cr.Key))
+                    availableResolutions.Add(cr.Value);
+            }
+
+            resolution = ScanningOptions.GetResolution(availableResolutions);
+
+            // See if the user selected a resolution
+            if (resolution != null)
+            {
+                // Now get the preset string from the resolution chosen
+                var preset = (from c in consideredResolutions
+                              where c.Value.Width == resolution.Width
+                                && c.Value.Height == resolution.Height
+                              select c.Key).FirstOrDefault();
+
+                // If we found a matching preset, let's set it on the session
+                if (!string.IsNullOrEmpty(preset))
+                    session.SessionPreset = preset;
+            }
+
+            var input = AVCaptureDeviceInput.FromDevice(captureDevice);
+            if (input == null)
+            {
+                Console.WriteLine("No input - this won't work on the simulator, try a physical device");
+                if (overlayView != null)
+                {
+                    this.AddSubview(overlayView);
+                    this.BringSubviewToFront(overlayView);
+                }
+                return false;
+            }
+            else
+                session.AddInput(input);
 
 
-			var perf2 = PerformanceCounter.Start ();
+            var startedAVPreviewLayerAlloc = PerformanceCounter.Start();
 
-			#if __UNIFIED__
-			previewLayer.VideoGravity = AVLayerVideoGravity.ResizeAspectFill;
-			#else
+            previewLayer = new AVCaptureVideoPreviewLayer(session);
+
+            PerformanceCounter.Stop(startedAVPreviewLayerAlloc, "Alloc AVCaptureVideoPreviewLayer took {0} ms.");
+
+
+            // //Framerate set here (15 fps)
+            // if (UIDevice.CurrentDevice.CheckSystemVersion (7, 0))
+            // {
+            // 	var perf1 = PerformanceCounter.Start ();
+
+            // 	NSError lockForConfigErr = null;
+
+            // 	captureDevice.LockForConfiguration (out lockForConfigErr);
+            // 	if (lockForConfigErr == null)
+            // 	{
+            // 		captureDevice.ActiveVideoMinFrameDuration = new CMTime (1, 10);
+            // 		captureDevice.UnlockForConfiguration ();
+            // 	}
+
+            // 	PerformanceCounter.Stop (perf1, "PERF: ActiveVideoMinFrameDuration Took {0} ms");
+            // }
+            //          else
+            //              previewLayer.Connection.VideoMinFrameDuration = new CMTime(1, 10);
+
+
+            var perf2 = PerformanceCounter.Start();
+
+#if __UNIFIED__
+            previewLayer.VideoGravity = AVLayerVideoGravity.ResizeAspectFill;
+#else
 			previewLayer.LayerVideoGravity = AVLayerVideoGravity.ResizeAspectFill;
-			#endif
-			previewLayer.Frame = new CGRect(0, 0, this.Frame.Width, this.Frame.Height);
-			previewLayer.Position = new CGPoint(this.Layer.Bounds.Width / 2, (this.Layer.Bounds.Height / 2));
+#endif
+            previewLayer.Frame = new CGRect(0, 0, this.Frame.Width, this.Frame.Height);
+            previewLayer.Position = new CGPoint(this.Layer.Bounds.Width / 2, (this.Layer.Bounds.Height / 2));
 
-			layerView = new UIView(new CGRect(0, 0, this.Frame.Width, this.Frame.Height));
-			layerView.AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight;
-			layerView.Layer.AddSublayer(previewLayer);
+            layerView = new UIView(new CGRect(0, 0, this.Frame.Width, this.Frame.Height));
+            layerView.AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight;
+            layerView.Layer.AddSublayer(previewLayer);
 
-			this.AddSubview(layerView);
+            this.AddSubview(layerView);
 
-			ResizePreview(UIApplication.SharedApplication.StatusBarOrientation);
+            ResizePreview(UIApplication.SharedApplication.StatusBarOrientation);
 
-			if (overlayView != null)
-			{
-				this.AddSubview (overlayView);
-				this.BringSubviewToFront (overlayView);
+            if (overlayView != null)
+            {
+                this.AddSubview(overlayView);
+                this.BringSubviewToFront(overlayView);
 
-				//overlayView.LayoutSubviews ();
-			}
+                //overlayView.LayoutSubviews ();
+            }
 
-			PerformanceCounter.Stop (perf2, "PERF: Setting up layers took {0} ms");
+            PerformanceCounter.Stop(perf2, "PERF: Setting up layers took {0} ms");
 
-			var perf3 = PerformanceCounter.Start ();
+            var perf3 = PerformanceCounter.Start();
 
-			session.StartRunning ();
+            session.StartRunning();
 
-			PerformanceCounter.Stop (perf3, "PERF: session.StartRunning() took {0} ms");
+            PerformanceCounter.Stop(perf3, "PERF: session.StartRunning() took {0} ms");
 
-			var perf4 = PerformanceCounter.Start ();
+            var perf4 = PerformanceCounter.Start();
 
-			var videoSettings = NSDictionary.FromObjectAndKey (new NSNumber ((int) CVPixelFormatType.CV32BGRA),
-				CVPixelBuffer.PixelFormatTypeKey);
+            var videoSettings = NSDictionary.FromObjectAndKey(new NSNumber((int)CVPixelFormatType.CV32BGRA),
+                CVPixelBuffer.PixelFormatTypeKey);
 
 
-			// create a VideoDataOutput and add it to the sesion
-			output = new AVCaptureVideoDataOutput {
-				WeakVideoSettings = videoSettings
-			};
+            // create a VideoDataOutput and add it to the sesion
+            output = new AVCaptureVideoDataOutput
+            {
+                WeakVideoSettings = videoSettings
+            };
 
-			// configure the output
-			queue = new DispatchQueue("ZxingScannerView"); // (Guid.NewGuid().ToString());
+            // configure the output
+            queue = new DispatchQueue("ZxingScannerView"); // (Guid.NewGuid().ToString());
 
-			var barcodeReader = ScanningOptions.BuildBarcodeReader();
+            var barcodeReader = ScanningOptions.BuildBarcodeReader();
 
-			outputRecorder = new OutputRecorder (this, img =>
-			{
-				var ls = img;
+            outputRecorder = new OutputRecorder(this, img =>
+            {
+                if (Picture)
+                {
+                    Picture = false;
+                    SendPictureBack?.Invoke(this, img.Matrix);
+                }
+                var ls = img;
 
-				if (!IsAnalyzing)
-					return false;
+                if (!IsAnalyzing)
+                    return false;
 
-				try
-				{
-					var perfDecode = PerformanceCounter.Start();
+                try
+                {
+                    var perfDecode = PerformanceCounter.Start();
 
-					if (shouldRotatePreviewBuffer)
-						ls = ls.rotateCounterClockwise();
-					
-					var result = barcodeReader.Decode(ls);
+                    if (shouldRotatePreviewBuffer)
+                        ls = ls.rotateCounterClockwise();
 
-					PerformanceCounter.Stop(perfDecode, "Decode Time: {0} ms");
+                    var result = barcodeReader.Decode(ls);
 
-                    if (result != null) {
-						resultCallback(result);
+                    PerformanceCounter.Stop(perfDecode, "Decode Time: {0} ms");
+
+                    if (result != null)
+                    {
+                        resultCallback(result);
                         return true;
                     }
-				}
-				catch (Exception ex)
-				{
-					Console.WriteLine("DECODE FAILED: " + ex);
-				}
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("DECODE FAILED: " + ex);
+                }
 
                 return false;
-			});
+            });
 
-			output.AlwaysDiscardsLateVideoFrames = true;
-			output.SetSampleBufferDelegate (outputRecorder, queue);
+            output.AlwaysDiscardsLateVideoFrames = true;
+            output.SetSampleBufferDelegate(outputRecorder, queue);
 
-			PerformanceCounter.Stop(perf4, "PERF: SetupCamera Finished.  Took {0} ms.");
+            PerformanceCounter.Stop(perf4, "PERF: SetupCamera Finished.  Took {0} ms.");
 
-			session.AddOutput (output);
-			//session.StartRunning ();
+            session.AddOutput(output);
+            //session.StartRunning ();
 
 
-			var perf5 = PerformanceCounter.Start ();
+            var perf5 = PerformanceCounter.Start();
 
-			NSError err = null;
-			if (captureDevice.LockForConfiguration(out err))
-			{
-				if (ScanningOptions.DisableAutofocus) {
-					captureDevice.FocusMode = AVCaptureFocusMode.Locked;
-				} else {
-					if (captureDevice.IsFocusModeSupported(AVCaptureFocusMode.ContinuousAutoFocus))
-						captureDevice.FocusMode = AVCaptureFocusMode.ContinuousAutoFocus;
-					else if (captureDevice.IsFocusModeSupported(AVCaptureFocusMode.AutoFocus))
-						captureDevice.FocusMode = AVCaptureFocusMode.AutoFocus;
-				}
+            NSError err = null;
+            if (captureDevice.LockForConfiguration(out err))
+            {
+                if (ScanningOptions.DisableAutofocus)
+                {
+                    captureDevice.FocusMode = AVCaptureFocusMode.Locked;
+                }
+                else
+                {
+                    if (captureDevice.IsFocusModeSupported(AVCaptureFocusMode.ContinuousAutoFocus))
+                        captureDevice.FocusMode = AVCaptureFocusMode.ContinuousAutoFocus;
+                    else if (captureDevice.IsFocusModeSupported(AVCaptureFocusMode.AutoFocus))
+                        captureDevice.FocusMode = AVCaptureFocusMode.AutoFocus;
+                }
 
-				if (captureDevice.IsExposureModeSupported (AVCaptureExposureMode.ContinuousAutoExposure))
-					captureDevice.ExposureMode = AVCaptureExposureMode.ContinuousAutoExposure;
-				else if (captureDevice.IsExposureModeSupported(AVCaptureExposureMode.AutoExpose))
-					captureDevice.ExposureMode = AVCaptureExposureMode.AutoExpose;
+                if (captureDevice.IsExposureModeSupported(AVCaptureExposureMode.ContinuousAutoExposure))
+                    captureDevice.ExposureMode = AVCaptureExposureMode.ContinuousAutoExposure;
+                else if (captureDevice.IsExposureModeSupported(AVCaptureExposureMode.AutoExpose))
+                    captureDevice.ExposureMode = AVCaptureExposureMode.AutoExpose;
 
-				if (captureDevice.IsWhiteBalanceModeSupported (AVCaptureWhiteBalanceMode.ContinuousAutoWhiteBalance))
-					captureDevice.WhiteBalanceMode = AVCaptureWhiteBalanceMode.ContinuousAutoWhiteBalance;
-				else if (captureDevice.IsWhiteBalanceModeSupported (AVCaptureWhiteBalanceMode.AutoWhiteBalance))
-						captureDevice.WhiteBalanceMode = AVCaptureWhiteBalanceMode.AutoWhiteBalance;
+                if (captureDevice.IsWhiteBalanceModeSupported(AVCaptureWhiteBalanceMode.ContinuousAutoWhiteBalance))
+                    captureDevice.WhiteBalanceMode = AVCaptureWhiteBalanceMode.ContinuousAutoWhiteBalance;
+                else if (captureDevice.IsWhiteBalanceModeSupported(AVCaptureWhiteBalanceMode.AutoWhiteBalance))
+                    captureDevice.WhiteBalanceMode = AVCaptureWhiteBalanceMode.AutoWhiteBalance;
 
-				if (UIDevice.CurrentDevice.CheckSystemVersion (7, 0) && captureDevice.AutoFocusRangeRestrictionSupported)
-					captureDevice.AutoFocusRangeRestriction = AVCaptureAutoFocusRangeRestriction.Near;
+                if (UIDevice.CurrentDevice.CheckSystemVersion(7, 0) && captureDevice.AutoFocusRangeRestrictionSupported)
+                    captureDevice.AutoFocusRangeRestriction = AVCaptureAutoFocusRangeRestriction.Near;
 
-				if (captureDevice.FocusPointOfInterestSupported)
-					captureDevice.FocusPointOfInterest = new PointF(0.5f, 0.5f);
+                if (captureDevice.FocusPointOfInterestSupported)
+                    captureDevice.FocusPointOfInterest = new PointF(0.5f, 0.5f);
 
-				if (captureDevice.ExposurePointOfInterestSupported)
-					captureDevice.ExposurePointOfInterest = new PointF (0.5f, 0.5f);
+                if (captureDevice.ExposurePointOfInterestSupported)
+                    captureDevice.ExposurePointOfInterest = new PointF(0.5f, 0.5f);
 
-				captureDevice.UnlockForConfiguration();
-			}
-			else
-				Console.WriteLine("Failed to Lock for Config: " + err.Description);
+                captureDevice.UnlockForConfiguration();
+            }
+            else
+                Console.WriteLine("Failed to Lock for Config: " + err.Description);
 
-			PerformanceCounter.Stop (perf5, "PERF: Setup Focus in {0} ms.");
-	
-			return true;
-		}
+            PerformanceCounter.Stop(perf5, "PERF: Setup Focus in {0} ms.");
 
-		public void DidRotate(UIInterfaceOrientation orientation)
-		{
-			ResizePreview (orientation);
+            return true;
+        }
 
-			this.LayoutSubviews ();
+        public void DidRotate(UIInterfaceOrientation orientation)
+        {
+            ResizePreview(orientation);
 
-			//			if (overlayView != null)
-			//	overlayView.LayoutSubviews ();
-		}
+            this.LayoutSubviews();
 
-		public void ResizePreview (UIInterfaceOrientation orientation)
-		{
-			shouldRotatePreviewBuffer = orientation == UIInterfaceOrientation.Portrait || orientation == UIInterfaceOrientation.PortraitUpsideDown;
+            //			if (overlayView != null)
+            //	overlayView.LayoutSubviews ();
+        }
 
-			if (previewLayer == null)
-				return;
+        public void ResizePreview(UIInterfaceOrientation orientation)
+        {
+            shouldRotatePreviewBuffer = orientation == UIInterfaceOrientation.Portrait || orientation == UIInterfaceOrientation.PortraitUpsideDown;
 
-			previewLayer.Frame = new CGRect (0, 0, this.Frame.Width, this.Frame.Height);
+            if (previewLayer == null)
+                return;
 
-			if (previewLayer.RespondsToSelector (new Selector ("connection")) && previewLayer.Connection != null)
-			{
-				switch (orientation)
-				{
-					case UIInterfaceOrientation.LandscapeLeft:
-						previewLayer.Connection.VideoOrientation = AVCaptureVideoOrientation.LandscapeLeft;
-						break;
-					case UIInterfaceOrientation.LandscapeRight:
-						previewLayer.Connection.VideoOrientation = AVCaptureVideoOrientation.LandscapeRight;
-						break;
-					case UIInterfaceOrientation.Portrait:
-						previewLayer.Connection.VideoOrientation = AVCaptureVideoOrientation.Portrait;
-						break;
-					case UIInterfaceOrientation.PortraitUpsideDown:
-						previewLayer.Connection.VideoOrientation = AVCaptureVideoOrientation.PortraitUpsideDown;
-						break;
-				}
-			}
-		}
+            previewLayer.Frame = new CGRect(0, 0, this.Frame.Width, this.Frame.Height);
 
-		public void Focus(PointF pointOfInterest)
-		{
-			//Get the device
-			if (AVMediaType.Video == null)
-				return;
+            if (previewLayer.RespondsToSelector(new Selector("connection")) && previewLayer.Connection != null)
+            {
+                switch (orientation)
+                {
+                    case UIInterfaceOrientation.LandscapeLeft:
+                        previewLayer.Connection.VideoOrientation = AVCaptureVideoOrientation.LandscapeLeft;
+                        break;
+                    case UIInterfaceOrientation.LandscapeRight:
+                        previewLayer.Connection.VideoOrientation = AVCaptureVideoOrientation.LandscapeRight;
+                        break;
+                    case UIInterfaceOrientation.Portrait:
+                        previewLayer.Connection.VideoOrientation = AVCaptureVideoOrientation.Portrait;
+                        break;
+                    case UIInterfaceOrientation.PortraitUpsideDown:
+                        previewLayer.Connection.VideoOrientation = AVCaptureVideoOrientation.PortraitUpsideDown;
+                        break;
+                }
+            }
+        }
 
-			var device = AVCaptureDevice.DefaultDeviceWithMediaType(AVMediaType.Video);
+        public void Focus(PointF pointOfInterest)
+        {
+            //Get the device
+            if (AVMediaType.Video == null)
+                return;
 
-			if (device == null)
-				return;
+            var device = AVCaptureDevice.DefaultDeviceWithMediaType(AVMediaType.Video);
 
-			//See if it supports focusing on a point
-			if (device.FocusPointOfInterestSupported && !device.AdjustingFocus)
-			{
-				NSError err = null;
+            if (device == null)
+                return;
 
-				//Lock device to config
-				if (device.LockForConfiguration(out err))
-				{
-					Console.WriteLine("Focusing at point: " + pointOfInterest.X + ", " + pointOfInterest.Y);
+            //See if it supports focusing on a point
+            if (device.FocusPointOfInterestSupported && !device.AdjustingFocus)
+            {
+                NSError err = null;
 
-					//Focus at the point touched
-					device.FocusPointOfInterest = pointOfInterest;
-					device.FocusMode = AVCaptureFocusMode.ContinuousAutoFocus;
-					device.UnlockForConfiguration();
-				}
-			}
-		}
+                //Lock device to config
+                if (device.LockForConfiguration(out err))
+                {
+                    Console.WriteLine("Focusing at point: " + pointOfInterest.X + ", " + pointOfInterest.Y);
 
-		public class OutputRecorder : AVCaptureVideoDataOutputSampleBufferDelegate 
-		{
+                    //Focus at the point touched
+                    device.FocusPointOfInterest = pointOfInterest;
+                    device.FocusMode = AVCaptureFocusMode.ContinuousAutoFocus;
+                    device.UnlockForConfiguration();
+                }
+            }
+        }
+
+        public class OutputRecorder : AVCaptureVideoDataOutputSampleBufferDelegate
+        {
             public OutputRecorder(IScannerSessionHost scannerHost, Func<LuminanceSource, bool> handleImage) : base()
             {
                 HandleImage = handleImage;
-				this.scannerHost = scannerHost;
+                this.scannerHost = scannerHost;
             }
 
-			IScannerSessionHost scannerHost;
+            IScannerSessionHost scannerHost;
             Func<LuminanceSource, bool> HandleImage;
 
-			DateTime lastAnalysis = DateTime.MinValue;
-			volatile bool working = false;
+            DateTime lastAnalysis = DateTime.MinValue;
+            volatile bool working = false;
             volatile bool wasScanned = false;
 
-			[Export ("captureOutput:didDropSampleBuffer:fromConnection:")]
-			public override void DidDropSampleBuffer(AVCaptureOutput captureOutput, CMSampleBuffer sampleBuffer, AVCaptureConnection connection)
-			{
-				//Console.WriteLine("Dropped Sample Buffer");
-			}
+            [Export("captureOutput:didDropSampleBuffer:fromConnection:")]
+            public override void DidDropSampleBuffer(AVCaptureOutput captureOutput, CMSampleBuffer sampleBuffer, AVCaptureConnection connection)
+            {
+                //Console.WriteLine("Dropped Sample Buffer");
+            }
 
-			public CancellationTokenSource CancelTokenSource = new CancellationTokenSource();
+            public CancellationTokenSource CancelTokenSource = new CancellationTokenSource();
 
 
-			public override void DidOutputSampleBuffer (AVCaptureOutput captureOutput, CMSampleBuffer sampleBuffer, AVCaptureConnection connection)
-			{
+            public override void DidOutputSampleBuffer(AVCaptureOutput captureOutput, CMSampleBuffer sampleBuffer, AVCaptureConnection connection)
+            {
                 var msSinceLastPreview = (DateTime.UtcNow - lastAnalysis).TotalMilliseconds;
-                    
+
                 if (msSinceLastPreview < scannerHost.ScanningOptions.DelayBetweenAnalyzingFrames
                     || (wasScanned && msSinceLastPreview < scannerHost.ScanningOptions.DelayBetweenContinuousScans)
                     || working
-				    || CancelTokenSource.IsCancellationRequested)
-				{
+                    || CancelTokenSource.IsCancellationRequested)
+                {
 
-					if (msSinceLastPreview < scannerHost.ScanningOptions.DelayBetweenAnalyzingFrames)
-						Console.WriteLine("Too soon between frames");
-					if (wasScanned && msSinceLastPreview < scannerHost.ScanningOptions.DelayBetweenContinuousScans)
-						Console.WriteLine("Too soon since last scan");
-					
-					if (sampleBuffer != null)
-					{
-						sampleBuffer.Dispose ();
-						sampleBuffer = null;
-					}
-					return;
-				}
+                    if (msSinceLastPreview < scannerHost.ScanningOptions.DelayBetweenAnalyzingFrames)
+                        Console.WriteLine("Too soon between frames");
+                    if (wasScanned && msSinceLastPreview < scannerHost.ScanningOptions.DelayBetweenContinuousScans)
+                        Console.WriteLine("Too soon since last scan");
+
+                    if (sampleBuffer != null)
+                    {
+                        sampleBuffer.Dispose();
+                        sampleBuffer = null;
+                    }
+                    return;
+                }
 
                 wasScanned = false;
-				working = true;
-				lastAnalysis = DateTime.UtcNow;
+                working = true;
+                lastAnalysis = DateTime.UtcNow;
 
-				try 
-				{
+                try
+                {
                     // Get the CoreVideo image
                     using (var pixelBuffer = sampleBuffer.GetImageBuffer() as CVPixelBuffer)
                     {
@@ -496,184 +523,190 @@ namespace ZXing.Mobile
                         pixelBuffer.Unlock(CVPixelBufferLock.ReadOnly);
                     }
 
-					//
-					// Although this looks innocent "Oh, he is just optimizing this case away"
-					// this is incredibly important to call on this callback, because the AVFoundation
-					// has a fixed number of buffers and if it runs out of free buffers, it will stop
-					// delivering frames. 
-					//	
-					sampleBuffer.Dispose ();
-					sampleBuffer = null;
+                    //
+                    // Although this looks innocent "Oh, he is just optimizing this case away"
+                    // this is incredibly important to call on this callback, because the AVFoundation
+                    // has a fixed number of buffers and if it runs out of free buffers, it will stop
+                    // delivering frames. 
+                    //	
+                    sampleBuffer.Dispose();
+                    sampleBuffer = null;
 
-				} catch (Exception e){
-					Console.WriteLine (e);
-				}
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e);
+                }
                 finally
                 {
                     working = false;
                 }
 
-			}
-		}
-	
-		#region IZXingScanner implementation
-        public void StartScanning (Action<Result> scanResultHandler, MobileBarcodeScanningOptions options = null)
-		{
-			if (!stopped)
-				return;
+            }
+        }
 
-			stopped = false;
+        #region IZXingScanner implementation
+        public void StartScanning(Action<Result> scanResultHandler, MobileBarcodeScanningOptions options = null)
+        {
+            if (!stopped)
+                return;
 
-			var perf = PerformanceCounter.Start ();
+            stopped = false;
 
-			Setup (this.Frame);
+            var perf = PerformanceCounter.Start();
 
-			this.ScanningOptions = options ?? MobileBarcodeScanningOptions.Default;
-			this.resultCallback = scanResultHandler;
+            Setup(this.Frame);
 
-			Console.WriteLine("StartScanning");
+            this.ScanningOptions = options ?? MobileBarcodeScanningOptions.Default;
+            this.resultCallback = scanResultHandler;
 
-			this.InvokeOnMainThread(() => {
-				if (!SetupCaptureSession())
-				{
-					//Setup 'simulated' view:
-					Console.WriteLine("Capture Session FAILED");
+            Console.WriteLine("StartScanning");
 
-				}
+            this.InvokeOnMainThread(() => {
+                if (!SetupCaptureSession())
+                {
+                    //Setup 'simulated' view:
+                    Console.WriteLine("Capture Session FAILED");
 
-				if (Runtime.Arch == Arch.SIMULATOR)
-				{
-					var simView = new UIView(new CGRect(0, 0, this.Frame.Width, this.Frame.Height));
-					simView.BackgroundColor = UIColor.LightGray;
-					simView.AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight;
-					this.InsertSubview(simView, 0);
-
-				}
-			});
-
-			if (!analyzing)
-				analyzing = true;
-
-			PerformanceCounter.Stop(perf, "PERF: StartScanning() Took {0} ms.");
-
-			var evt = this.OnScannerSetupComplete;
-			if (evt != null)
-				evt ();
-		}
-		
-		public void StopScanning()
-		{
-			if (overlayView != null) {
-				if (overlayView is ZXingDefaultOverlayView)
-					(overlayView as ZXingDefaultOverlayView).Destroy ();
-
-				overlayView = null;
-			}
-				
-			if (stopped)
-				return;
-
-			Console.WriteLine("Stopping...");
-
-			if (outputRecorder != null)
-				outputRecorder.CancelTokenSource.Cancel();
-	
-			//Try removing all existing outputs prior to closing the session
-			try
-			{
-				while (session.Outputs.Length > 0)
-					session.RemoveOutput (session.Outputs [0]);
-			}
-			catch { }
-
-			//Try to remove all existing inputs prior to closing the session
-			try
-			{
-				while (session.Inputs.Length > 0)
-					session.RemoveInput (session.Inputs [0]);
-			}
-			catch { }
-
-			if (session.Running)
-				session.StopRunning();
-
-			stopped = true;
-		}
-
-		public void PauseAnalysis ()
-		{
-			analyzing = false;
-		}
-
-		public void ResumeAnalysis ()
-		{
-			analyzing = true;
-		}
-
-		public void Torch (bool on)
-		{
-			try
-			{
-				NSError err;
-
-				var device = AVCaptureDevice.DefaultDeviceWithMediaType(AVMediaType.Video);
-
-                if (device.HasTorch || device.HasFlash) {
-                    
-    				device.LockForConfiguration(out err);
-
-    				if (on)
-    				{
-                        if (device.HasTorch)
-    					    device.TorchMode = AVCaptureTorchMode.On;
-                        if (device.HasFlash)
-    					    device.FlashMode = AVCaptureFlashMode.On;
-    				}
-    				else
-    				{
-                        if (device.HasTorch)
-    					    device.TorchMode = AVCaptureTorchMode.Off;
-                        if (device.HasFlash)
-    					    device.FlashMode = AVCaptureFlashMode.Off;
-    				}
-
-    				device.UnlockForConfiguration();
                 }
-				device = null;
+
+                if (Runtime.Arch == Arch.SIMULATOR)
+                {
+                    var simView = new UIView(new CGRect(0, 0, this.Frame.Width, this.Frame.Height));
+                    simView.BackgroundColor = UIColor.LightGray;
+                    simView.AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight;
+                    this.InsertSubview(simView, 0);
+
+                }
+            });
+
+            if (!analyzing)
+                analyzing = true;
+
+            PerformanceCounter.Stop(perf, "PERF: StartScanning() Took {0} ms.");
+
+            var evt = this.OnScannerSetupComplete;
+            if (evt != null)
+                evt();
+        }
+
+        public void StopScanning()
+        {
+            if (overlayView != null)
+            {
+                if (overlayView is ZXingDefaultOverlayView)
+                    (overlayView as ZXingDefaultOverlayView).Destroy();
+
+                overlayView = null;
+            }
+
+            if (stopped)
+                return;
+
+            Console.WriteLine("Stopping...");
+
+            if (outputRecorder != null)
+                outputRecorder.CancelTokenSource.Cancel();
+
+            //Try removing all existing outputs prior to closing the session
+            try
+            {
+                while (session.Outputs.Length > 0)
+                    session.RemoveOutput(session.Outputs[0]);
+            }
+            catch { }
+
+            //Try to remove all existing inputs prior to closing the session
+            try
+            {
+                while (session.Inputs.Length > 0)
+                    session.RemoveInput(session.Inputs[0]);
+            }
+            catch { }
+
+            if (session.Running)
+                session.StopRunning();
+
+            stopped = true;
+        }
+
+        public void PauseAnalysis()
+        {
+            analyzing = false;
+        }
+
+        public void ResumeAnalysis()
+        {
+            analyzing = true;
+        }
+
+        public void Torch(bool on)
+        {
+            try
+            {
+                NSError err;
+
+                var device = AVCaptureDevice.DefaultDeviceWithMediaType(AVMediaType.Video);
+
+                if (device.HasTorch || device.HasFlash)
+                {
+
+                    device.LockForConfiguration(out err);
+
+                    if (on)
+                    {
+                        if (device.HasTorch)
+                            device.TorchMode = AVCaptureTorchMode.On;
+                        if (device.HasFlash)
+                            device.FlashMode = AVCaptureFlashMode.On;
+                    }
+                    else
+                    {
+                        if (device.HasTorch)
+                            device.TorchMode = AVCaptureTorchMode.Off;
+                        if (device.HasFlash)
+                            device.FlashMode = AVCaptureFlashMode.Off;
+                    }
+
+                    device.UnlockForConfiguration();
+                }
+                device = null;
 
 
-				torch = on;
-			}
-			catch { }
-		}
+                torch = on;
+            }
+            catch { }
+        }
 
-		public void ToggleTorch()
-		{
-			Torch(!IsTorchOn);
-		}
+        public void ToggleTorch()
+        {
+            Torch(!IsTorchOn);
+        }
 
-		public void AutoFocus ()
-		{
-			//Doesn't do much on iOS :(
-		}
-
-        public void AutoFocus (int x, int y)
+        public void AutoFocus()
         {
             //Doesn't do much on iOS :(
         }
 
-		public string TopText { get;set; }
-		public string BottomText { get;set; }
+        public void AutoFocus(int x, int y)
+        {
+            //Doesn't do much on iOS :(
+        }
+
+        public string TopText { get; set; }
+        public string BottomText { get; set; }
 
 
-		public UIView CustomOverlayView { get; set; }
-		public bool UseCustomOverlayView { get; set; }
-		public bool IsAnalyzing { get { return analyzing; } }
-		public bool IsTorchOn { get { return torch; } }
+        public UIView CustomOverlayView { get; set; }
+        public bool UseCustomOverlayView { get; set; }
+        public bool IsAnalyzing { get { return analyzing; } }
+        public bool IsTorchOn { get { return torch; } }
 
         bool? hasTorch = null;
-        public bool HasTorch {
-            get {
+        public bool HasTorch
+        {
+            get
+            {
                 if (hasTorch.HasValue)
                     return hasTorch.Value;
 
@@ -682,6 +715,6 @@ namespace ZXing.Mobile
                 return hasTorch.Value;
             }
         }
-		#endregion
-	}
+        #endregion
+    }
 }
