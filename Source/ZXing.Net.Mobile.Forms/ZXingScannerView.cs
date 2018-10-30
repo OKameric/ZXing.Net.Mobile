@@ -26,11 +26,6 @@ namespace ZXing.Net.Mobile.Forms
             ScanResultCommand?.Execute(Result);
         }
 
-        public void RaiseOnTakePicture(byte[] result)
-        {
-            OnTakePicture?.Invoke(this, result);
-        }
-
 
         public void ToggleTorch()
         {

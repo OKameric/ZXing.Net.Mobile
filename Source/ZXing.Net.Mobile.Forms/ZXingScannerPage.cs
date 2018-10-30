@@ -8,7 +8,7 @@ namespace ZXing.Net.Mobile.Forms
     {
         ZXingScannerView zxing;
         ZXingDefaultOverlay defaultOverlay = null;
-        public EventHandler<byte[]> GotBytes;
+        public EventHandler<byte[]> OnPictureTaken;
         public ZXingScannerPage(MobileBarcodeScanningOptions options = null, View customOverlay = null) : base()
         {
             zxing = new ZXingScannerView
@@ -71,7 +71,7 @@ namespace ZXing.Net.Mobile.Forms
         private void OnTakePicture(object sender, byte[] e)
         {
             System.Diagnostics.Debug.WriteLine("PICTURE TAKEN");
-            GotBytes?.Invoke(this, e);
+            OnPictureTaken?.Invoke(this, e);
         }
 
 
@@ -120,8 +120,7 @@ namespace ZXing.Net.Mobile.Forms
         }
         public void ToggleTorch()
         {
-            if (zxing != null)
-                zxing.ToggleTorch();
+            zxing?.ToggleTorch();
         }
 
         protected override void OnAppearing()

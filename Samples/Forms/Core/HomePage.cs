@@ -4,6 +4,10 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Plugin.Media;
+using Plugin.Media.Abstractions;
+using Plugin.Permissions;
+using Plugin.Permissions.Abstractions;
 using Xamarin.Forms;
 using ZXing.Mobile;
 using ZXing.Net.Mobile.Forms;
@@ -170,8 +174,32 @@ namespace FormsSample
                 image.HorizontalOptions = LayoutOptions.Center;
                 image.VerticalOptions = LayoutOptions.Center;
                 //image.Source = new UriImageSource() { Uri = new Uri("https://cloud.netlifyusercontent.com/assets/344dbf88-fdf9-42bb-adb4-46f01eedd629/242ce817-97a3-48fe-9acd-b1bf97930b01/09-posterization-opt.jpg") };
-                image.WidthRequest = 200;
-                image.HeightRequest = 200;
+                image.WidthRequest = 50;
+                image.HeightRequest = 50;
+
+                image.GestureRecognizers.Add(new TapGestureRecognizer(){Command = new Command(async o =>
+                {
+                    var cameraStatus = await CrossPermissions.Current.CheckPermissionStatusAsync(Permission.Camera);
+                    var storageStatus = await CrossPermissions.Current.CheckPermissionStatusAsync(Permission.Storage);
+
+                    if (cameraStatus != PermissionStatus.Granted || storageStatus != PermissionStatus.Granted)
+                    {
+                        var results = await CrossPermissions.Current.RequestPermissionsAsync(new[] { Permission.Camera, Permission.Storage });
+                        cameraStatus = results[Permission.Camera];
+                        storageStatus = results[Permission.Storage];
+                    }
+
+                    if (cameraStatus == PermissionStatus.Granted && storageStatus == PermissionStatus.Granted)
+                    {
+                        var file = await CrossMedia.Current.PickPhotoAsync();
+                    }
+                    else
+                    {
+                        await DisplayAlert("Permissions Denied", "Unable to take photos.", "OK");
+                        //On iOS you may want to send your user to the settings screen.
+                        //CrossPermissions.Current.OpenAppSettings();
+                    }
+                })});
 
                 circleButton.HorizontalOptions = LayoutOptions.Center;
                 circleButton.VerticalOptions = LayoutOptions.Center;
@@ -191,7 +219,7 @@ namespace FormsSample
                 imageGrid.Children.Add(fotoLabel, 0, 0);
                 Grid.SetColumnSpan(fotoLabel, 2);
 
-                //imageGrid.Children.Add(image, 0, 1);
+                imageGrid.Children.Add(image, 0, 1);
                 imageGrid.Children.Add(circleButton, 0, 1);
                 Grid.SetColumnSpan(circleButton, 2);
 
@@ -201,7 +229,7 @@ namespace FormsSample
                 });
 
                 rootGrid.Children.Add(imageGrid, 0, 2);
-                rootGrid.Children.Add(image, 0, 1);
+                //rootGrid.Children.Add(image, 0, 1);
 
 
                 scanPage = new ZXingScannerPage(new ZXing.Mobile.MobileBarcodeScanningOptions
@@ -209,7 +237,7 @@ namespace FormsSample
                     AutoRotate = true,
                     CameraResolutionSelector = resolutions => resolutions.First(),
                 }, customOverlay: rootGrid);
-                scanPage.GotBytes += GotBytes;
+                scanPage.OnPictureTaken += OnPictureTaken;
                 NavigationPage.SetHasNavigationBar(scanPage, false);
                 scanPage.OnScanResult += (result) =>
                 {
@@ -275,7 +303,7 @@ namespace FormsSample
             Content = stack;
         }
 
-        private void GotBytes(object sender, byte[] e)
+        private void OnPictureTaken(object sender, byte[] e)
         {
             if (e != null)
             {

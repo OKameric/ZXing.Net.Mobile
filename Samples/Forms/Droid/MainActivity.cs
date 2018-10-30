@@ -19,7 +19,7 @@ namespace FormsSample.Droid
         protected override void OnCreate (Bundle bundle)
         {
             base.OnCreate (bundle);
-            CrossCurrentActivity.Current.Init(this, bundle);
+            //CrossCurrentActivity.Current.Init(this, bundle);
 
             global::Xamarin.Forms.Forms.Init (this, bundle);
 
