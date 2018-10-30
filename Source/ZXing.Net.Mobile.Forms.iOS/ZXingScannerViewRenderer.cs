@@ -65,10 +65,24 @@ namespace ZXing.Net.Mobile.Forms.iOS
 
             base.OnElementChanged(e);
         }
-        private void SendPictureBack(object sender, byte[] e)
+
+        private void SendPictureBack(object sender, UIImage e)
         {
-            formsView.OnTakePicture?.Invoke(this, e);
+
+            //var x = Xamarin.Forms.ImageSource.FromStream(() => e.AsPNG().AsStream());
+            using (NSData imageData = e.AsPNG())
+            {
+                Byte[] myByteArray = new Byte[imageData.Length];
+                System.Runtime.InteropServices.Marshal.Copy(imageData.Bytes, myByteArray, 0, Convert.ToInt32(imageData.Length));
+                formsView.OnTakePicture?.Invoke(this, myByteArray);            
+            }
+
         }
+
+        //private void SendPictureBack(object sender, byte[] e)
+        //{
+        //    formsView.OnTakePicture?.Invoke(this, e);
+        //}
         protected override void OnElementPropertyChanged(object sender, PropertyChangedEventArgs e)
         {
             base.OnElementPropertyChanged(sender, e);

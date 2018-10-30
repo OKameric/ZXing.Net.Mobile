@@ -21,10 +21,10 @@ namespace ZXing.Mobile
 {
     public class ZXingScannerView : UIView, IZXingScanner<UIView>, IScannerSessionHost
     {
-        public EventHandler<byte[]> SendPictureBack;
+        public EventHandler<UIImage> SendPictureBack;
         public delegate void ScannerSetupCompleteDelegate();
         public event ScannerSetupCompleteDelegate OnScannerSetupComplete;
-        public bool Picture { get; set; } = false;
+        public static bool Picture { get; set; } = false;
 
         public ZXingScannerView()
         {
@@ -42,10 +42,10 @@ namespace ZXing.Mobile
         {
             Picture = true;
         }
-        private void OnPictureTaken(object sender, byte[] e)
-        {
-            SendPictureBack?.Invoke(this, e);
-        }
+        //private void OnPictureTaken(object sender, byte[] e)
+        //{
+        //    SendPictureBack?.Invoke(this, e);
+        //}
 
         AVCaptureSession session;
         AVCaptureVideoPreviewLayer previewLayer;
@@ -80,7 +80,8 @@ namespace ZXing.Mobile
             {
                 overlayView = new ZXingDefaultOverlayView(new CGRect(0, 0, this.Frame.Width, this.Frame.Height),
                     TopText, BottomText, CancelButtonText, FlashButtonText,
-                    () => {
+                    () =>
+                    {
                         var evt = OnCancelButtonPressed;
                         if (evt != null)
                             evt();
@@ -287,13 +288,14 @@ namespace ZXing.Mobile
 
             var barcodeReader = ScanningOptions.BuildBarcodeReader();
 
+
             outputRecorder = new OutputRecorder(this, img =>
             {
-                if (Picture)
-                {
-                    Picture = false;
-                    SendPictureBack?.Invoke(this, img.Matrix);
-                }
+                //if (Picture)
+                //{                    
+                //    Picture = false;
+                //    SendPictureBack?.Invoke(this, img.Matrix);
+                //}
                 var ls = img;
 
                 if (!IsAnalyzing)
@@ -322,6 +324,10 @@ namespace ZXing.Mobile
                 }
 
                 return false;
+            }, image =>
+            {
+                SendPictureBack?.Invoke(this, image);
+                return true;
             });
 
             output.AlwaysDiscardsLateVideoFrames = true;
@@ -377,6 +383,11 @@ namespace ZXing.Mobile
             PerformanceCounter.Stop(perf5, "PERF: Setup Focus in {0} ms.");
 
             return true;
+        }
+
+        private void HandleCaptured(UIImage arg)
+        {
+            SendPictureBack?.Invoke(this, arg);
         }
 
         public void DidRotate(UIInterfaceOrientation orientation)
@@ -449,14 +460,20 @@ namespace ZXing.Mobile
 
         public class OutputRecorder : AVCaptureVideoDataOutputSampleBufferDelegate
         {
-            public OutputRecorder(IScannerSessionHost scannerHost, Func<LuminanceSource, bool> handleImage) : base()
+            public OutputRecorder(IScannerSessionHost scannerHost, Func<LuminanceSource, bool> handleImage, Func<UIImage, bool> handleCaptured) : base()
             {
                 HandleImage = handleImage;
+                HandleCapturedImage = handleCaptured;
                 this.scannerHost = scannerHost;
             }
 
+            public UIImage CapturedImage { get; set; }
+
+
             IScannerSessionHost scannerHost;
             Func<LuminanceSource, bool> HandleImage;
+
+            Func<UIImage, bool> HandleCapturedImage;
 
             DateTime lastAnalysis = DateTime.MinValue;
             volatile bool working = false;
@@ -473,6 +490,7 @@ namespace ZXing.Mobile
 
             public override void DidOutputSampleBuffer(AVCaptureOutput captureOutput, CMSampleBuffer sampleBuffer, AVCaptureConnection connection)
             {
+
                 var msSinceLastPreview = (DateTime.UtcNow - lastAnalysis).TotalMilliseconds;
 
                 if (msSinceLastPreview < scannerHost.ScanningOptions.DelayBetweenAnalyzingFrames
@@ -505,6 +523,28 @@ namespace ZXing.Mobile
                     {
                         // Lock the base address
                         pixelBuffer.Lock(CVPixelBufferLock.ReadOnly); // MAYBE NEEDS READ/WRITE
+
+                        if (Picture)
+                        {
+                            Picture = false;
+                            CapturedImage = null;
+                            var baseAddress = pixelBuffer.BaseAddress;
+                            nint bytesPerRow = pixelBuffer.BytesPerRow;
+                            nint width = pixelBuffer.Width;
+                            nint height = pixelBuffer.Height;
+
+                            var flags = CGBitmapFlags.PremultipliedFirst | CGBitmapFlags.ByteOrder32Little;
+                            // Create a CGImage on the RGB colorspace from the configured parameter above
+                            using (var cs = CGColorSpace.CreateDeviceRGB())
+                            using (var context = new CGBitmapContext(baseAddress, width, height, 8, bytesPerRow, cs, flags))
+                            using (var cgImage = context.ToImage())
+                            {
+                                pixelBuffer.Unlock(CVPixelBufferLock.None);
+                                CapturedImage = UIImage.FromImage(cgImage);
+                                //SendPictureBack?.Invoke(this, CapturedImage);
+                                HandleCapturedImage(CapturedImage);
+                            }
+                        }
 
                         LuminanceSource luminanceSource;
 
@@ -562,7 +602,8 @@ namespace ZXing.Mobile
 
             Console.WriteLine("StartScanning");
 
-            this.InvokeOnMainThread(() => {
+            this.InvokeOnMainThread(() =>
+            {
                 if (!SetupCaptureSession())
                 {
                     //Setup 'simulated' view:
